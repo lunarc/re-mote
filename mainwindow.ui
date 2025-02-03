@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>MainWindow</string>
+   <string>Re-mote</string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
@@ -27,7 +27,17 @@
          </widget>
         </item>
         <item>
-         <widget class="QLineEdit" name="hostnameEdit"/>
+         <widget class="QLineEdit" name="hostnameEdit">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>10</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
         </item>
         <item>
          <widget class="QLabel" name="usernameLabel">
@@ -37,7 +47,17 @@
          </widget>
         </item>
         <item>
-         <widget class="QLineEdit" name="usernameEdit"/>
+         <widget class="QLineEdit" name="usernameEdit">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>10</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
         </item>
        </layout>
       </item>
@@ -52,26 +72,18 @@
         </item>
         <item>
          <widget class="QLineEdit" name="passwordEdit">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>5</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
           <property name="echoMode">
            <enum>QLineEdit::EchoMode::Password</enum>
           </property>
          </widget>
         </item>
        </layout>
-      </item>
-      <item>
-       <widget class="QPushButton" name="connectButton">
-        <property name="text">
-         <string>Connect</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="disconnectButton">
-        <property name="text">
-         <string>Disconnect</string>
-        </property>
-       </widget>
       </item>
       <item>
        <spacer name="horizontalSpacer">
@@ -86,6 +98,23 @@
         </property>
        </spacer>
       </item>
+      <item>
+       <widget class="QPushButton" name="connectButton">
+        <property name="text">
+         <string>Connect</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="disconnectButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Disconnect</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>
@@ -98,6 +127,37 @@
       </property>
      </widget>
     </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_4">
+      <item>
+       <widget class="QLabel" name="commandLabel">
+        <property name="text">
+         <string>Command</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="commandEdit">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="clearButtonEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="executeButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Execute</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menuBar">
@@ -106,7 +166,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>22</height>
+     <height>21</height>
     </rect>
    </property>
   </widget>

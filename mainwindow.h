@@ -21,15 +21,26 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    void disableControls();
+    void enableControls();
+
 public slots:
 
     void onConnected();
     void onDisconnected();
-    void handleOutput(const QString &output);
-    void handleError(const QString &error);
+    void onError(const QString &message);
+
+    void onAuthenticationFailed();
+    void onAuthenticationSucceeded();
+    void onKeyboardInteractivePrompt(const QString &name, const QString &instruction, const QStringList &prompts);
+    void onTunnelEstablished(const QString &bindAddress, uint16_t bindPort);
+    void onTunnelClosed(const QString &bindAddress, uint16_t bindPort);
+    void onDataReceived(const QByteArray &data);
 
     void on_connectButton_clicked();
     void on_disconnectButton_clicked();
+    void on_executeButton_clicked();
+    void on_commandEdit_returnPressed();
 
 private:
     Ui::MainWindow *ui;
