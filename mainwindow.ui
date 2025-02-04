@@ -120,19 +120,9 @@
     <item>
      <layout class="QHBoxLayout" name="horizontalLayout_5">
       <item>
-       <widget class="QLabel" name="destLabel">
-        <property name="text">
-         <string>Dest</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="destEdit"/>
-      </item>
-      <item>
        <widget class="QLabel" name="portLabel">
         <property name="text">
-         <string>Port</string>
+         <string>Local port</string>
         </property>
        </widget>
       </item>
@@ -149,7 +139,7 @@
       <item>
        <widget class="QLabel" name="bindLabel">
         <property name="text">
-         <string>Bind</string>
+         <string>Remote</string>
         </property>
        </widget>
       </item>
@@ -253,7 +243,7 @@
      <x>0</x>
      <y>0</y>
      <width>851</width>
-     <height>22</height>
+     <height>21</height>
     </rect>
    </property>
   </widget>

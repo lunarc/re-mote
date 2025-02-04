@@ -25,6 +25,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(m_sshClient.get(), &SSHClient::tunnelClosed, this, &MainWindow::onTunnelClosed);
     connect(m_sshClient.get(), &SSHClient::dataReceived, this, &MainWindow::onDataReceived);
 
+    connect(m_sshClient.get(), &SSHClient::commandChannelClosed, this, &MainWindow::onCommandChannelClosed);
+    connect(m_sshClient.get(), &SSHClient::commandOutputReceived, this, &MainWindow::onCommandOutputReceived);
+    connect(m_sshClient.get(), &SSHClient::commandChannelError, this, &MainWindow::onCommandChannelError);
+
     disableControls();
 }
 
@@ -151,11 +155,29 @@ void MainWindow::onForwardConnectionClosed()
     log("Forward connection closed");
 }
 
+void MainWindow::onCommandChannelClosed(uint64_t channelId)
+{
+    log("Command channel closed: " + QString::number(channelId));
+    // m_sshClient->closeCommandChannel(channelId);
+}
+
+void MainWindow::onCommandOutputReceived(uint64_t channelId, const QByteArray &data)
+{
+    // log("Command output received: " + QString::fromUtf8(data));
+    ui->textEdit->append(QString::fromUtf8(data));
+}
+
+void MainWindow::onCommandChannelError(uint64_t channelId, const QString &error)
+{
+    log("Command channel error: " + error);
+    // m_sshClient->closeCommandChannel(channelId);
+}
+
 void MainWindow::on_connectButton_clicked()
 {
     m_sshClient->connectToHost(ui->hostnameEdit->text(), ui->usernameEdit->text());
     // m_sshClient->authenticateWithPassword(ui->passwordEdit->text());
-    //  m_sshClient->authenticateWithPublicKey("/path/to/private_key", "passphrase");
+    // m_sshClient->authenticateWithPublicKey("/path/to/private_key", "passphrase");
 
     log("Trying to authenticate with KeyboardInteractive");
     m_sshClient->authenticateWithKeyboardInteractive();
@@ -185,7 +207,14 @@ void MainWindow::on_executeButton_clicked()
 
 void MainWindow::on_commandEdit_returnPressed()
 {
-    m_sshClient->executeCommand(ui->commandEdit->text());
+    // m_sshClient->executeCommand(ui->commandEdit->text());
+    // ui->commandEdit->clear();
+
+    if (m_commandChannel == 0)
+        m_commandChannel = m_sshClient->executeCommandAsync(ui->commandEdit->text());
+    else
+        m_sshClient->writeToCommandChannel(m_commandChannel, ui->commandEdit->text().toUtf8());
+
     ui->commandEdit->clear();
 }
 

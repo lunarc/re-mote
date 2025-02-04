@@ -334,6 +334,38 @@ void SSHClient::checkChannels()
             emit dataReceived(QByteArray(buffer, nbytes));
         }
     }
+
+    // Check command channels
+    for (auto it = m_commandChannels.begin(); it != m_commandChannels.end();)
+    {
+        ssh_channel channel = it.value().channel;
+        uint64_t channelId = it.key();
+
+        if (ssh_channel_is_closed(channel))
+        {
+            closeCommandChannel(channelId);
+            it = m_commandChannels.begin();
+            continue;
+        }
+
+        // Check for incoming data
+        char buffer[CHANNEL_BUFFER_SIZE];
+        int nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
+
+        if (nbytes > 0)
+        {
+            emit commandOutputReceived(channelId, QByteArray(buffer, nbytes));
+        }
+        else if (nbytes < 0)
+        {
+            emit commandChannelError(channelId, "Error reading from command channel");
+            closeCommandChannel(channelId);
+            it = m_commandChannels.begin();
+            continue;
+        }
+
+        ++it;
+    }
 }
 
 void SSHClient::sendData(const QByteArray &data)
@@ -400,4 +432,73 @@ void SSHClient::initializeSession()
 ssh_session SSHClient::session() const
 {
     return m_session;
+}
+
+uint64_t SSHClient::executeCommandAsync(const QString &command)
+{
+    if (!m_session || !m_isAuthenticated)
+        return 0;
+
+    ssh_channel channel = ssh_channel_new(m_session);
+    if (channel == nullptr)
+    {
+        emit error("Failed to create command channel");
+        return 0;
+    }
+
+    int rc = ssh_channel_open_session(channel);
+    if (rc != SSH_OK)
+    {
+        ssh_channel_free(channel);
+        emit error("Failed to open command channel");
+        return 0;
+    }
+
+    rc = ssh_channel_request_exec(channel, command.toStdString().c_str());
+    if (rc != SSH_OK)
+    {
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        emit error("Failed to execute command");
+        return 0;
+    }
+
+    uint64_t channelId = ++m_nextCommandChannelId;
+    CommandChannel cmdChannel = {channel, command, true};
+    m_commandChannels[channelId] = cmdChannel;
+
+    return channelId;
+}
+
+void SSHClient::closeCommandChannel(uint64_t channelId)
+{
+    auto it = m_commandChannels.find(channelId);
+    if (it != m_commandChannels.end())
+    {
+        ssh_channel_close(it.value().channel);
+        ssh_channel_free(it.value().channel);
+        m_commandChannels.remove(channelId);
+        emit commandChannelClosed(channelId);
+    }
+}
+
+bool SSHClient::isCommandChannelActive(uint64_t channelId) const
+{
+    auto it = m_commandChannels.find(channelId);
+    if (it != m_commandChannels.end())
+    {
+        return it.value().active && !ssh_channel_is_closed(it.value().channel);
+    }
+    return false;
+}
+
+bool SSHClient::writeToCommandChannel(uint64_t channelId, const QByteArray &data)
+{
+    auto it = m_commandChannels.find(channelId);
+    if (it != m_commandChannels.end() && it.value().active)
+    {
+        int rc = ssh_channel_write(it.value().channel, data.constData(), data.size());
+        return rc == data.size();
+    }
+    return false;
 }
