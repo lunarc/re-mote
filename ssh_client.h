@@ -53,6 +53,11 @@ public:
     // Command execution
     bool executeCommand(const QString &command);
 
+    bool isConnected() const;
+    bool isAuthenticated() const;
+
+    ssh_session session() const; 
+
 signals:
     void connected();
     void disconnected();

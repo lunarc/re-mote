@@ -1,11 +1,11 @@
-#ifndef MAINWINDOW_H
-#define MAINWINDOW_H
+#pragma once
 
 #include <QMainWindow>
 
 #include <memory>
 
 #include "ssh_client.h"
+#include "ssh_port_forward.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui
@@ -24,6 +24,8 @@ public:
     void disableControls();
     void enableControls();
 
+    void log(const QString &message);
+
 public slots:
 
     void onConnected();
@@ -37,14 +39,22 @@ public slots:
     void onTunnelClosed(const QString &bindAddress, uint16_t bindPort);
     void onDataReceived(const QByteArray &data);
 
+    void onForwardingStarted(quint16 localPort);
+    void onForwardingStopped();
+    void onForwardError(const QString &message);
+    void onNewForwardConnectionEstablished(const QString &remoteHost, quint16 remotePort);
+    void onForwardConnectionClosed();
+
     void on_connectButton_clicked();
     void on_disconnectButton_clicked();
     void on_executeButton_clicked();
     void on_commandEdit_returnPressed();
+    void on_connectTunnelButton_clicked();
+    void on_disconnectTunnelButton_clicked();
 
 private:
     Ui::MainWindow *ui;
 
     std::unique_ptr< SSHClient > m_sshClient;
+    std::unique_ptr< SSHPortForward > m_sshPortForward;
 };
-#endif // MAINWINDOW_H

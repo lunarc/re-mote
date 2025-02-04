@@ -19,6 +19,10 @@ find_package(Qt6 COMPONENTS Widgets Network REQUIRED)
 set(PROJECT_SOURCES
         ssh_client.h
         ssh_client.cpp
+        ssh_port_forward.h
+        ssh_port_forward.cpp
+        forwarding_channel.h
+        forwarding_channel.cpp
         main.cpp
         mainwindow.cpp
         mainwindow.h

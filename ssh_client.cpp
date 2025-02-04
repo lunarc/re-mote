@@ -299,6 +299,16 @@ bool SSHClient::executeCommand(const QString &command)
     return true;
 }
 
+bool SSHClient::isConnected() const
+{
+    return m_session && ssh_is_connected(m_session);
+}
+
+bool SSHClient::isAuthenticated() const
+{
+    return m_isAuthenticated;
+}
+
 void SSHClient::checkChannels()
 {
     if (!m_session)
@@ -385,4 +395,9 @@ void SSHClient::initializeSession()
 
     int timeout = 10; // seconds
     ssh_options_set(m_session, SSH_OPTIONS_TIMEOUT, &timeout);
+}
+
+ssh_session SSHClient::session() const
+{
+    return m_session;
 }
