@@ -3,7 +3,11 @@
 
 #include <QDebug>
 
-SSHClient::SSHClient(QObject *parent) : QObject(parent), m_session(nullptr), m_isAuthenticated(false)
+#include <iostream>
+
+SSHClient::SSHClient(QObject *parent)
+    : QObject(parent), m_session(nullptr), m_isAuthenticated(false), m_nextCommandChannelId(0),
+      m_channelCheckTimer(this)
 {
     m_channelCheckTimer.setInterval(CHANNEL_CHECK_INTERVAL);
     connect(&m_channelCheckTimer, &QTimer::timeout, this, &SSHClient::checkChannels);
@@ -311,8 +315,11 @@ bool SSHClient::isAuthenticated() const
 
 void SSHClient::checkChannels()
 {
+    std::cout << "Checking channels\n";
     if (!m_session)
         return;
+
+    // Check active channels
 
     for (auto it = m_activeChannels.begin(); it != m_activeChannels.end(); ++it)
     {
@@ -336,34 +343,30 @@ void SSHClient::checkChannels()
     }
 
     // Check command channels
+
     for (auto it = m_commandChannels.begin(); it != m_commandChannels.end();)
     {
         ssh_channel channel = it.value().channel;
         uint64_t channelId = it.key();
 
-        if (ssh_channel_is_closed(channel))
-        {
-            closeCommandChannel(channelId);
-            it = m_commandChannels.begin();
-            continue;
-        }
-
-        // Check for incoming data
+        std::cout << "About to read from channel " << channelId << std::endl;
         char buffer[CHANNEL_BUFFER_SIZE];
         int nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
+        std::cout << "Read returned: " << nbytes << std::endl;
 
         if (nbytes > 0)
         {
             emit commandOutputReceived(channelId, QByteArray(buffer, nbytes));
         }
+        else if (nbytes == 0)
+        {
+            // Not necessarily an error - might just be no data available
+            std::cout << "No data available on channel " << channelId << std::endl;
+        }
         else if (nbytes < 0)
         {
-            emit commandChannelError(channelId, "Error reading from command channel");
-            closeCommandChannel(channelId);
-            it = m_commandChannels.begin();
-            continue;
+            std::cout << "Error reading from channel " << channelId << ": " << ssh_get_error(m_session) << std::endl;
         }
-
         ++it;
     }
 }
@@ -439,32 +442,51 @@ uint64_t SSHClient::executeCommandAsync(const QString &command)
     if (!m_session || !m_isAuthenticated)
         return 0;
 
-    ssh_channel channel = ssh_channel_new(m_session);
-    if (channel == nullptr)
+    // First time - create and initialize shell channel
+
+    if (!m_shellChannel)
     {
-        emit error("Failed to create command channel");
-        return 0;
+        m_shellChannel = ssh_channel_new(m_session);
+        if (m_shellChannel == nullptr)
+        {
+            emit error("Failed to create shell channel");
+            return 0;
+        }
+
+        int rc = ssh_channel_open_session(m_shellChannel);
+        if (rc != SSH_OK)
+        {
+            ssh_channel_free(m_shellChannel);
+            m_shellChannel = nullptr;
+            emit error("Failed to open shell channel");
+            return 0;
+        }
+
+        // Request interactive shell
+        rc = ssh_channel_request_shell(m_shellChannel);
+        if (rc != SSH_OK)
+        {
+            ssh_channel_close(m_shellChannel);
+            ssh_channel_free(m_shellChannel);
+            m_shellChannel = nullptr;
+            emit error("Failed to request shell");
+            return 0;
+        }
+
+        ssh_channel_set_blocking(m_shellChannel, 0);
     }
 
-    int rc = ssh_channel_open_session(channel);
-    if (rc != SSH_OK)
+    // Send command through shell channel
+    QString fullCommand = command + "\n"; // Add newline to execute
+    int written = ssh_channel_write(m_shellChannel, fullCommand.toStdString().c_str(), fullCommand.length());
+    if (written != fullCommand.length())
     {
-        ssh_channel_free(channel);
-        emit error("Failed to open command channel");
-        return 0;
-    }
-
-    rc = ssh_channel_request_exec(channel, command.toStdString().c_str());
-    if (rc != SSH_OK)
-    {
-        ssh_channel_close(channel);
-        ssh_channel_free(channel);
-        emit error("Failed to execute command");
+        emit error("Failed to write command to shell");
         return 0;
     }
 
     uint64_t channelId = ++m_nextCommandChannelId;
-    CommandChannel cmdChannel = {channel, command, true};
+    CommandChannel cmdChannel = {m_shellChannel, command, true};
     m_commandChannels[channelId] = cmdChannel;
 
     return channelId;

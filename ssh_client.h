@@ -115,5 +115,6 @@ private:
     };
 
     QMap< uint64_t, CommandChannel > m_commandChannels;
-    uint64_t m_nextCommandChannelId;
+    uint64_t m_nextCommandChannelId{0};
+    ssh_channel m_shellChannel = nullptr;
 };

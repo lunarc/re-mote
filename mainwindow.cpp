@@ -30,6 +30,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(m_sshClient.get(), &SSHClient::commandChannelError, this, &MainWindow::onCommandChannelError);
 
     disableControls();
+
+    ui->hostnameEdit->setText("172.25.139.172");
+    ui->usernameEdit->setText("lindemann");
 }
 
 MainWindow::~MainWindow()
@@ -207,14 +210,7 @@ void MainWindow::on_executeButton_clicked()
 
 void MainWindow::on_commandEdit_returnPressed()
 {
-    // m_sshClient->executeCommand(ui->commandEdit->text());
-    // ui->commandEdit->clear();
-
-    if (m_commandChannel == 0)
-        m_commandChannel = m_sshClient->executeCommandAsync(ui->commandEdit->text());
-    else
-        m_sshClient->writeToCommandChannel(m_commandChannel, ui->commandEdit->text().toUtf8());
-
+    m_sshClient->executeCommandAsync(ui->commandEdit->text());
     ui->commandEdit->clear();
 }
 
