@@ -45,9 +45,10 @@ public slots:
     void onNewForwardConnectionEstablished(const QString &remoteHost, quint16 remotePort);
     void onForwardConnectionClosed();
 
-    void onCommandChannelClosed(uint64_t channelId);
-    void onCommandOutputReceived(uint64_t channelId, const QByteArray &data);
-    void onCommandChannelError(uint64_t channelId, const QString &error);
+    void onChannelOpened();
+    void onChannelClosed(int exitStatus);
+    void onChannelOutputReceived(const QByteArray &data, bool isStderr);
+    void onChannelError(const QString &error);
 
     void on_connectButton_clicked();
     void on_disconnectButton_clicked();
@@ -59,8 +60,8 @@ public slots:
 private:
     Ui::MainWindow *ui;
 
-    std::unique_ptr< SSHClient > m_sshClient;
-    std::unique_ptr< SSHPortForward > m_sshPortForward;
+    SSHClient *m_sshClient{nullptr};
+    SSHPortForward *m_sshPortForward{nullptr};
 
     uint64_t m_commandChannel = 0;
 };

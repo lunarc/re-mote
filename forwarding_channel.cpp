@@ -3,75 +3,83 @@
 #include <QAbstractEventDispatcher>
 #include <QEventLoop>
 #include <QThread>
+#include <QTimer>
 
 ForwardingChannel::ForwardingChannel(ssh_channel channel, QObject *parent)
-    : QObject(parent), sshChannel(channel), isRunning(false)
+    : QObject(parent), m_channel(channel), m_active(false)
 {
+    m_pollTimer.setInterval(0); // Make as responsive as possible
+    connect(&m_pollTimer, &QTimer::timeout, this, &ForwardingChannel::checkChannel);
+}
+
+ForwardingChannel::~ForwardingChannel()
+{
+    stop();
 }
 
 void ForwardingChannel::start()
 {
-    isRunning = true;
-
-    // Use non-blocking reads with proper error handling
-    while (isRunning)
-    {
-        char buffer[4096];
-        int nbytes = ssh_channel_read_nonblocking(sshChannel, buffer, sizeof(buffer), 0);
-
-        if (nbytes > 0)
-        {
-            emit dataReceived(QByteArray(buffer, nbytes));
-        }
-        else if (nbytes == SSH_ERROR)
-        {
-            emit error(QString("SSH channel read error: %1").arg(ssh_get_error(ssh_channel_get_session(sshChannel))));
-            break;
-        }
-        else if (nbytes == SSH_EOF)
-        {
-            emit channelClosed();
-            break;
-        }
-        else
-        {
-            // Use event loop instead of sleep
-            QThread::currentThread()->eventDispatcher()->processEvents(QEventLoop::AllEvents);
-        }
-    }
+    m_active = true;
+    m_pollTimer.start();
 }
 
 void ForwardingChannel::stop()
 {
-    isRunning = false;
-}
-
-ssh_channel ForwardingChannel::channel() const
-{
-    return sshChannel;
+    m_active = false;
+    m_pollTimer.stop();
+    emit channelClosed();
 }
 
 void ForwardingChannel::writeData(const QByteArray &data)
 {
-    QMutexLocker locker(&writeMutex);
+    if (!m_active || !m_channel)
+        return;
 
     int written = 0;
-    while (written < data.size() && isRunning)
+    const char *ptr = data.constData();
+    int remaining = data.size();
+
+    while (remaining > 0 && m_active)
     {
-        int result = ssh_channel_write(sshChannel, data.constData() + written, data.size() - written);
-
-        if (result == SSH_ERROR)
+        int n = ssh_channel_write(m_channel, ptr + written, remaining);
+        if (n == SSH_ERROR)
         {
-            emit error(QString("SSH channel write error: %1").arg(ssh_get_error(ssh_channel_get_session(sshChannel))));
-            break;
+            stop();
+            return;
         }
-
-        written += result;
-
-        // If we couldn't write everything, wait a bit before retrying
-        if (written < data.size())
+        if (n <= 0)
         {
-            QThread::msleep(1);
+            // Would block, try again later
+            QTimer::singleShot(0, this, [this, data = data.mid(written)]() { writeData(data); });
+            return;
         }
+        written += n;
+        remaining -= n;
+    }
+}
+
+void ForwardingChannel::checkChannel()
+{
+    if (!m_active || !m_channel)
+        return;
+
+    // Check if channel is closed
+    if (ssh_channel_is_closed(m_channel))
+    {
+        stop();
+        return;
+    }
+
+    // Read available data
+    char buffer[BUFFER_SIZE];
+    int nbytes = ssh_channel_read_nonblocking(m_channel, buffer, sizeof(buffer), 0);
+
+    if (nbytes > 0)
+    {
+        emit dataReceived(QByteArray(buffer, nbytes));
+    }
+    else if (nbytes == SSH_ERROR)
+    {
+        stop();
     }
 }

@@ -1,8 +1,9 @@
 #pragma once
 
-#include <QObject>
-#include <QList>
 #include "forwarding_channel.h"
+#include <QList>
+#include <QObject>
+#include <QSharedPointer>
 
 class QTcpServer;
 class QTcpSocket;
@@ -10,24 +11,33 @@ class SSHClient;
 
 class SSHPortForward : public QObject {
     Q_OBJECT
-public:
-    explicit SSHPortForward(SSHClient* sshClient, QObject* parent = nullptr);
-    ~SSHPortForward();
-
-    bool startForwarding(quint16 localPort, const QString& remoteHost, quint16 remotePort);
-    void stopForwarding();
-
-signals:
-    void forwardingStarted(quint16 localPort);
-    void forwardingStopped();
-    void error(const QString& message);
-    void newConnectionEstablished(const QString& remoteHost, quint16 remotePort);
-    void connectionClosed();
 
 private:
-    void handleNewConnection(QTcpSocket* socket, const QString& remoteHost, quint16 remotePort);
+    QSharedPointer< SSHClient > m_client;
+    QTcpServer *m_server;
+    QList< ForwardingChannel * > m_channels;
+    QString m_remoteHost;
+    quint16 m_remotePort;
+    quint16 m_localPort;
+    bool m_isForwarding;
 
-    SSHClient* client;
-    QTcpServer* tcpServer;
-    QList<ForwardingChannel*> channels;
+public:
+    explicit SSHPortForward(SSHClient *client, QObject *parent = nullptr);
+    ~SSHPortForward();
+
+    bool startForwarding(quint16 localPort, const QString &remoteHost, quint16 remotePort);
+    void stopForwarding();
+    bool isForwarding() const;
+    quint16 localPort() const;
+
+signals:
+    void error(const QString &message);
+    void newConnectionEstablished(const QString &host, quint16 port);
+    void connectionClosed();
+    void forwardingStarted(quint16 localPort);
+    void forwardingStopped();
+
+private slots:
+    void handleNewConnection();
+    void cleanupChannel(ForwardingChannel *channel);
 };

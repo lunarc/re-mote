@@ -6,8 +6,8 @@
 #include <iostream>
 
 SSHClient::SSHClient(QObject *parent)
-    : QObject(parent), m_session(nullptr), m_isAuthenticated(false), m_nextCommandChannelId(0),
-      m_channelCheckTimer(this)
+    : QObject(parent), m_session(nullptr), m_isAuthenticated(false), m_channelCheckTimer(this),
+      m_persistentChannel(nullptr), m_shellChannel(nullptr), m_currentHostname(), m_currentUsername()
 {
     m_channelCheckTimer.setInterval(CHANNEL_CHECK_INTERVAL);
     connect(&m_channelCheckTimer, &QTimer::timeout, this, &SSHClient::checkChannels);
@@ -342,33 +342,7 @@ void SSHClient::checkChannels()
         }
     }
 
-    // Check command channels
-
-    for (auto it = m_commandChannels.begin(); it != m_commandChannels.end();)
-    {
-        ssh_channel channel = it.value().channel;
-        uint64_t channelId = it.key();
-
-        std::cout << "About to read from channel " << channelId << std::endl;
-        char buffer[CHANNEL_BUFFER_SIZE];
-        int nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
-        std::cout << "Read returned: " << nbytes << std::endl;
-
-        if (nbytes > 0)
-        {
-            emit commandOutputReceived(channelId, QByteArray(buffer, nbytes));
-        }
-        else if (nbytes == 0)
-        {
-            // Not necessarily an error - might just be no data available
-            std::cout << "No data available on channel " << channelId << std::endl;
-        }
-        else if (nbytes < 0)
-        {
-            std::cout << "Error reading from channel " << channelId << ": " << ssh_get_error(m_session) << std::endl;
-        }
-        ++it;
-    }
+    checkPersistentChannel();
 }
 
 void SSHClient::sendData(const QByteArray &data)
@@ -432,95 +406,281 @@ void SSHClient::initializeSession()
     ssh_options_set(m_session, SSH_OPTIONS_TIMEOUT, &timeout);
 }
 
+void SSHClient::checkPersistentChannel()
+{
+    if (!m_persistentChannel || !m_persistentChannel->active)
+        return;
+
+    ssh_channel channel = m_persistentChannel->channel;
+    bool hasData = false;
+
+    // Check if channel has exited
+    if (!m_persistentChannel->hasExited && ssh_channel_is_eof(channel))
+    {
+        m_persistentChannel->hasExited = true;
+        m_persistentChannel->exitStatus = ssh_channel_get_exit_status(channel);
+    }
+
+    // Read and filter stdout
+    char buffer[CHANNEL_BUFFER_SIZE];
+    int nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
+    if (nbytes > 0)
+    {
+        QByteArray filtered = filterPtyOutput(QByteArray(buffer, nbytes));
+        if (!filtered.isEmpty())
+        {
+            emit channelOutputReceived(filtered, false);
+        }
+        hasData = true;
+    }
+
+    // Read and filter stderr if not merging output
+    if (!m_persistentChannel->options.mergeOutput)
+    {
+        nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 1);
+        if (nbytes > 0)
+        {
+            QByteArray filtered = filterPtyOutput(QByteArray(buffer, nbytes));
+            if (!filtered.isEmpty())
+            {
+                emit channelOutputReceived(filtered, true);
+            }
+            hasData = true;
+        }
+    }
+
+    // Close channel if no more data and EOF received
+    if (!hasData && m_persistentChannel->hasExited && ssh_channel_is_eof(channel))
+    {
+        closeCommandChannel();
+    }
+}
+
 ssh_session SSHClient::session() const
 {
     return m_session;
 }
 
-uint64_t SSHClient::executeCommandAsync(const QString &command)
+bool SSHClient::openCommandChannel(const CommandOptions &options)
 {
     if (!m_session || !m_isAuthenticated)
-        return 0;
+        return false;
 
-    // First time - create and initialize shell channel
-
-    if (!m_shellChannel)
+    if (m_persistentChannel)
     {
-        m_shellChannel = ssh_channel_new(m_session);
-        if (m_shellChannel == nullptr)
-        {
-            emit error("Failed to create shell channel");
-            return 0;
-        }
+        emit error("Command channel already open");
+        return false;
+    }
 
-        int rc = ssh_channel_open_session(m_shellChannel);
+    ssh_channel channel = ssh_channel_new(m_session);
+    if (channel == nullptr)
+    {
+        emit error("Failed to create command channel");
+        return false;
+    }
+
+    int rc = ssh_channel_open_session(channel);
+    if (rc != SSH_OK)
+    {
+        ssh_channel_free(channel);
+        emit error("Failed to open command channel");
+        return false;
+    }
+
+    if (options.ptyEnabled)
+    {
+        rc = ssh_channel_request_pty_size(channel, options.term.toStdString().c_str(), options.columns, options.rows);
         if (rc != SSH_OK)
         {
-            ssh_channel_free(m_shellChannel);
-            m_shellChannel = nullptr;
-            emit error("Failed to open shell channel");
-            return 0;
+            ssh_channel_close(channel);
+            ssh_channel_free(channel);
+            emit error("Failed to request PTY");
+            return false;
         }
 
-        // Request interactive shell
-        rc = ssh_channel_request_shell(m_shellChannel);
+        // Request shell for interactive session
+        rc = ssh_channel_request_shell(channel);
         if (rc != SSH_OK)
         {
-            ssh_channel_close(m_shellChannel);
-            ssh_channel_free(m_shellChannel);
-            m_shellChannel = nullptr;
+            ssh_channel_close(channel);
+            ssh_channel_free(channel);
             emit error("Failed to request shell");
-            return 0;
+            return false;
         }
-
-        ssh_channel_set_blocking(m_shellChannel, 0);
     }
 
-    // Send command through shell channel
-    QString fullCommand = command + "\n"; // Add newline to execute
-    int written = ssh_channel_write(m_shellChannel, fullCommand.toStdString().c_str(), fullCommand.length());
-    if (written != fullCommand.length())
-    {
-        emit error("Failed to write command to shell");
-        return 0;
-    }
+    m_persistentChannel = std::make_unique< PersistentChannel >();
+    m_persistentChannel->channel = channel;
+    m_persistentChannel->active = true;
+    m_persistentChannel->options = options;
+    m_persistentChannel->hasExited = false;
+    m_persistentChannel->exitStatus = 0;
 
-    uint64_t channelId = ++m_nextCommandChannelId;
-    CommandChannel cmdChannel = {m_shellChannel, command, true};
-    m_commandChannels[channelId] = cmdChannel;
-
-    return channelId;
+    emit channelOpened();
+    return true;
 }
 
-void SSHClient::closeCommandChannel(uint64_t channelId)
+void SSHClient::closeCommandChannel()
 {
-    auto it = m_commandChannels.find(channelId);
-    if (it != m_commandChannels.end())
+    if (m_persistentChannel)
     {
-        ssh_channel_close(it.value().channel);
-        ssh_channel_free(it.value().channel);
-        m_commandChannels.remove(channelId);
-        emit commandChannelClosed(channelId);
+        ssh_channel_send_eof(m_persistentChannel->channel);
+        ssh_channel_close(m_persistentChannel->channel);
+        ssh_channel_free(m_persistentChannel->channel);
+        emit channelClosed(m_persistentChannel->exitStatus);
+        m_persistentChannel.reset();
     }
 }
 
-bool SSHClient::isCommandChannelActive(uint64_t channelId) const
+bool SSHClient::executeInChannel(const QString &command)
 {
-    auto it = m_commandChannels.find(channelId);
-    if (it != m_commandChannels.end())
+    if (!m_persistentChannel || !m_persistentChannel->active)
     {
-        return it.value().active && !ssh_channel_is_closed(it.value().channel);
+        emit error("No active command channel");
+        return false;
     }
-    return false;
+
+    // For PTY-enabled channels, just write the command
+    if (m_persistentChannel->options.ptyEnabled)
+    {
+        QByteArray cmdWithNewline = command.toUtf8() + "\n";
+        return writeToChannel(cmdWithNewline);
+    }
+    else
+    {
+        // For non-PTY channels, use exec
+        int rc = ssh_channel_request_exec(m_persistentChannel->channel, command.toStdString().c_str());
+        return rc == SSH_OK;
+    }
 }
 
-bool SSHClient::writeToCommandChannel(uint64_t channelId, const QByteArray &data)
+bool SSHClient::writeToChannel(const QByteArray &data)
 {
-    auto it = m_commandChannels.find(channelId);
-    if (it != m_commandChannels.end() && it.value().active)
+    if (!m_persistentChannel || !m_persistentChannel->active)
     {
-        int rc = ssh_channel_write(it.value().channel, data.constData(), data.size());
-        return rc == data.size();
+        return false;
     }
-    return false;
+
+    int rc = ssh_channel_write(m_persistentChannel->channel, data.constData(), data.size());
+    return rc == data.size();
+}
+
+bool SSHClient::resizeChannel(int columns, int rows)
+{
+    if (!m_persistentChannel || !m_persistentChannel->active || !m_persistentChannel->options.ptyEnabled)
+    {
+        return false;
+    }
+
+    int rc = ssh_channel_change_pty_size(m_persistentChannel->channel, columns, rows);
+    return rc == SSH_OK;
+}
+
+void SSHClient::setPtyFilter(PtyFilterCallback filter)
+{
+    m_ptyFilter = filter;
+}
+
+QByteArray SSHClient::cleanTerminalOutput(const QByteArray &data)
+{
+    return QByteArray();
+}
+
+bool SSHClient::isCommandChannelOpen() const
+{
+    return m_persistentChannel && m_persistentChannel->active;
+}
+
+QByteArray SSHClient::filterPtyOutput(const QByteArray &data)
+{
+    if (!m_persistentChannel || !m_persistentChannel->options.ptyEnabled)
+        return data;
+
+    switch (m_persistentChannel->options.outputMode)
+    {
+    case PtyOutputMode::Raw:
+        return data;
+
+    case PtyOutputMode::StripAll:
+        return stripAnsiSequences(data, false);
+
+    case PtyOutputMode::Basic:
+        return stripAnsiSequences(data, true);
+
+    case PtyOutputMode::Custom:
+        return m_ptyFilter ? m_ptyFilter(data) : data;
+
+    default:
+        return data;
+    }
+}
+
+QByteArray SSHClient::stripAnsiSequences(const QByteArray &data, bool keepBasicFormatting)
+{
+    QByteArray result;
+    result.reserve(data.size());
+
+    enum class State
+    {
+        Normal,
+        Escape,
+        CSI,
+        OSC
+    };
+    State state = State::Normal;
+
+    for (int i = 0; i < data.size(); ++i)
+    {
+        unsigned char c = data[i];
+
+        switch (state)
+        {
+        case State::Normal:
+            if (c == '\x1B') // ESC
+                state = State::Escape;
+            else if (c == '\a' || c == '\b') // Bell or backspace
+                continue;
+            else
+                result.append(c);
+            break;
+
+        case State::Escape:
+            if (c == '[')
+                state = State::CSI;
+            else if (c == ']')
+                state = State::OSC;
+            else
+                state = State::Normal;
+            break;
+
+        case State::CSI:
+            if (c >= 0x40 && c <= 0x7E) // End of CSI sequence
+            {
+                if (keepBasicFormatting && c == 'm') // SGR sequence
+                {
+                    // Keep only color and basic formatting
+                    result.append('\x1B');
+                    result.append('[');
+                    result.append(data.mid(i - (i - 2), i - 1));
+                    result.append(c);
+                }
+                state = State::Normal;
+            }
+            break;
+
+        case State::OSC:
+            // Skip window title and other OSC sequences
+            if (c == '\x07' || (c == '\\' && i > 0 && data[i - 1] == '\x1B'))
+                state = State::Normal;
+            break;
+        }
+    }
+
+    // Remove initial "0;" if present
+    if (result.startsWith("0;"))
+        result.remove(0, 2);
+
+    return result;
+
+    return result;
 }

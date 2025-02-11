@@ -7,36 +7,46 @@
 
 #include <QInputDialog>
 
-MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow)
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent), ui(new Ui::MainWindow), m_sshClient(nullptr), m_sshPortForward(nullptr)
 {
     ui->setupUi(this);
 
-    m_sshClient = std::make_unique< SSHClient >(this);
+    m_sshClient = new SSHClient(this);
 
     // Connect signals
 
-    connect(m_sshClient.get(), &SSHClient::connected, this, &MainWindow::onConnected);
-    connect(m_sshClient.get(), &SSHClient::disconnected, this, &MainWindow::onDisconnected);
-    connect(m_sshClient.get(), &SSHClient::error, this, &MainWindow::onError);
-    connect(m_sshClient.get(), &SSHClient::keyboardInteractivePrompt, this, &MainWindow::onKeyboardInteractivePrompt);
-    connect(m_sshClient.get(), &SSHClient::authenticationFailed, this, &MainWindow::onAuthenticationFailed);
-    connect(m_sshClient.get(), &SSHClient::authenticationSucceeded, this, &MainWindow::onAuthenticationSucceeded);
-    connect(m_sshClient.get(), &SSHClient::tunnelEstablished, this, &MainWindow::onTunnelEstablished);
-    connect(m_sshClient.get(), &SSHClient::tunnelClosed, this, &MainWindow::onTunnelClosed);
-    connect(m_sshClient.get(), &SSHClient::dataReceived, this, &MainWindow::onDataReceived);
+    connect(m_sshClient, &SSHClient::connected, this, &MainWindow::onConnected);
+    connect(m_sshClient, &SSHClient::disconnected, this, &MainWindow::onDisconnected);
+    connect(m_sshClient, &SSHClient::error, this, &MainWindow::onError);
+    connect(m_sshClient, &SSHClient::keyboardInteractivePrompt, this, &MainWindow::onKeyboardInteractivePrompt);
+    connect(m_sshClient, &SSHClient::authenticationFailed, this, &MainWindow::onAuthenticationFailed);
+    connect(m_sshClient, &SSHClient::authenticationSucceeded, this, &MainWindow::onAuthenticationSucceeded);
+    connect(m_sshClient, &SSHClient::tunnelEstablished, this, &MainWindow::onTunnelEstablished);
+    connect(m_sshClient, &SSHClient::tunnelClosed, this, &MainWindow::onTunnelClosed);
 
-    connect(m_sshClient.get(), &SSHClient::commandChannelClosed, this, &MainWindow::onCommandChannelClosed);
-    connect(m_sshClient.get(), &SSHClient::commandOutputReceived, this, &MainWindow::onCommandOutputReceived);
-    connect(m_sshClient.get(), &SSHClient::commandChannelError, this, &MainWindow::onCommandChannelError);
+    connect(m_sshClient, &SSHClient::channelOutputReceived, this, &MainWindow::onChannelOutputReceived);
+    connect(m_sshClient, &SSHClient::channelOpened, this, &MainWindow::onChannelOpened);
+    connect(m_sshClient, &SSHClient::channelClosed, this, &MainWindow::onChannelClosed);
+    connect(m_sshClient, &SSHClient::channelError, this, &MainWindow::onChannelError);
 
     disableControls();
 
-    ui->hostnameEdit->setText("172.25.139.172");
+    ui->connectTunnelButton->setEnabled(true);
+    ui->disconnectTunnelButton->setEnabled(false);
+
+    ui->hostnameEdit->setText("192.168.86.28");
     ui->usernameEdit->setText("lindemann");
 }
 
 MainWindow::~MainWindow()
 {
+    if (m_sshPortForward != nullptr)
+        delete m_sshPortForward;
+
+    if (m_sshClient != nullptr)
+        delete m_sshClient;
+
     delete ui;
 }
 
@@ -92,6 +102,15 @@ void MainWindow::onAuthenticationSucceeded()
     ui->statusBar->showMessage("Authentication succeeded.");
     enableControls();
     log("Authentication succeeded");
+
+    SSHClient::CommandOptions options;
+    options.ptyEnabled = true; // Enable PTY for interactive apps
+    options.columns = 120;     // Set reasonable terminal size
+    options.rows = 40;
+    options.mergeOutput = true; // Merge stderr with stdout
+    options.outputMode = SSHClient::PtyOutputMode::StripAll;
+
+    m_sshClient->openCommandChannel(options);
 }
 
 void MainWindow::onKeyboardInteractivePrompt(const QString &name, const QString &instruction,
@@ -158,22 +177,25 @@ void MainWindow::onForwardConnectionClosed()
     log("Forward connection closed");
 }
 
-void MainWindow::onCommandChannelClosed(uint64_t channelId)
+void MainWindow::onChannelOpened()
 {
-    log("Command channel closed: " + QString::number(channelId));
-    // m_sshClient->closeCommandChannel(channelId);
+    log("Command channel opened");
 }
 
-void MainWindow::onCommandOutputReceived(uint64_t channelId, const QByteArray &data)
+void MainWindow::onChannelClosed(int exitStatus)
+{
+    log("Command channel closed with exit status: " + QString::number(exitStatus));
+}
+
+void MainWindow::onChannelOutputReceived(const QByteArray &data, bool isStderr)
 {
     // log("Command output received: " + QString::fromUtf8(data));
     ui->textEdit->append(QString::fromUtf8(data));
 }
 
-void MainWindow::onCommandChannelError(uint64_t channelId, const QString &error)
+void MainWindow::onChannelError(const QString &error)
 {
     log("Command channel error: " + error);
-    // m_sshClient->closeCommandChannel(channelId);
 }
 
 void MainWindow::on_connectButton_clicked()
@@ -200,6 +222,15 @@ void MainWindow::on_connectButton_clicked()
 void MainWindow::on_disconnectButton_clicked()
 {
     m_sshClient->disconnect();
+
+    if (m_sshPortForward != nullptr)
+    {
+        if (m_sshPortForward->isForwarding())
+            m_sshPortForward->stopForwarding();
+
+        ui->connectTunnelButton->setEnabled(true);
+        ui->disconnectTunnelButton->setEnabled(false);
+    }
 }
 
 void MainWindow::on_executeButton_clicked()
@@ -210,35 +241,35 @@ void MainWindow::on_executeButton_clicked()
 
 void MainWindow::on_commandEdit_returnPressed()
 {
-    m_sshClient->executeCommandAsync(ui->commandEdit->text());
+    m_sshClient->executeInChannel(ui->commandEdit->text());
     ui->commandEdit->clear();
 }
 
 void MainWindow::on_connectTunnelButton_clicked()
 {
-    m_sshPortForward = std::make_unique< SSHPortForward >(m_sshClient.get(), this);
-
-    connect(m_sshPortForward.get(), &SSHPortForward::forwardingStarted, this, &MainWindow::onForwardingStarted);
-    connect(m_sshPortForward.get(), &SSHPortForward::forwardingStopped, this, &MainWindow::onForwardingStopped);
-    connect(m_sshPortForward.get(), &SSHPortForward::error, this, &MainWindow::onForwardError);
-    connect(m_sshPortForward.get(), &SSHPortForward::newConnectionEstablished, this,
-            &MainWindow::onNewForwardConnectionEstablished);
-    connect(m_sshPortForward.get(), &SSHPortForward::connectionClosed, this, &MainWindow::onForwardConnectionClosed);
+    if (m_sshPortForward == nullptr)
+    {
+        m_sshPortForward = new SSHPortForward(m_sshClient, this);
+        connect(m_sshPortForward, &SSHPortForward::forwardingStarted, this, &MainWindow::onForwardingStarted,
+                Qt::QueuedConnection);
+        connect(m_sshPortForward, &SSHPortForward::forwardingStopped, this, &MainWindow::onForwardingStopped,
+                Qt::QueuedConnection);
+        connect(m_sshPortForward, &SSHPortForward::error, this, &MainWindow::onForwardError, Qt::QueuedConnection);
+        connect(m_sshPortForward, &SSHPortForward::newConnectionEstablished, this,
+                &MainWindow::onNewForwardConnectionEstablished, Qt::QueuedConnection);
+        connect(m_sshPortForward, &SSHPortForward::connectionClosed, this, &MainWindow::onForwardConnectionClosed,
+                Qt::QueuedConnection);
+    }
 
     m_sshPortForward->startForwarding(8888, "localhost", 8888);
-    /*
-    SSHClient::TunnelConfig config;
-    config.type = SSHClient::TunnelType::Local;
-    config.bindAddress = ui->destEdit->text();
-    config.bindPort = ui->destPortEdit->text().toUShort();
-    config.destAddress = ui->bindEdit->text();
-    config.destPort = ui->bindPortEdit->text().toUShort();
 
-    m_sshClient->createTunnel(config);
-    */
+    ui->connectTunnelButton->setEnabled(false);
+    ui->disconnectTunnelButton->setEnabled(true);
 }
 
 void MainWindow::on_disconnectTunnelButton_clicked()
 {
     m_sshPortForward->stopForwarding();
+    ui->connectTunnelButton->setEnabled(true);
+    ui->disconnectTunnelButton->setEnabled(false);
 }

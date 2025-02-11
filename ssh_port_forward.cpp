@@ -5,9 +5,11 @@
 #include <QTcpSocket>
 #include <QThread>
 
-SSHPortForward::SSHPortForward(SSHClient *sshClient, QObject *parent)
-    : QObject(parent), client(sshClient), tcpServer(nullptr)
+SSHPortForward::SSHPortForward(SSHClient *client, QObject *parent)
+    : QObject(parent), m_client(client), m_server(nullptr), m_remotePort(0), m_localPort(0), m_isForwarding(false)
 {
+    m_server = new QTcpServer(this);
+    connect(m_server, &QTcpServer::newConnection, this, &SSHPortForward::handleNewConnection);
 }
 
 SSHPortForward::~SSHPortForward()
@@ -17,55 +19,98 @@ SSHPortForward::~SSHPortForward()
 
 bool SSHPortForward::startForwarding(quint16 localPort, const QString &remoteHost, quint16 remotePort)
 {
-    if (!client || !client->isConnected())
+    // Make sure we're fully stopped first
+    stopForwarding();
+
+    if (!m_client || !m_client->isConnected() || !m_client->isAuthenticated())
     {
-        emit error("SSH client not connected");
+        emit error("SSH client not ready");
         return false;
     }
 
-    // Create and start TCP server
-    tcpServer = new QTcpServer(this);
-    if (!tcpServer->listen(QHostAddress::LocalHost, localPort))
+    // Ensure server is in a clean state
+    if (m_server->isListening())
     {
-        emit error(QString("Failed to start listening on port %1: %2").arg(localPort).arg(tcpServer->errorString()));
+        m_server->close();
+    }
+
+    // Store values before attempting to listen
+    m_remoteHost = remoteHost;
+    m_remotePort = remotePort;
+
+    if (!m_server->listen(QHostAddress::LocalHost, localPort))
+    {
+        emit error(QString("Failed to start listening on port %1: %2").arg(localPort).arg(m_server->errorString()));
+        m_remoteHost.clear();
+        m_remotePort = 0;
         return false;
     }
 
-    connect(tcpServer, &QTcpServer::newConnection, this, [=]() {
-        QTcpSocket *socket = tcpServer->nextPendingConnection();
-        handleNewConnection(socket, remoteHost, remotePort);
-    });
+    m_localPort = m_server->serverPort();
+    m_isForwarding = true;
 
-    emit forwardingStarted(localPort);
+    QMetaObject::invokeMethod(
+        this, [this]() { emit forwardingStarted(m_localPort); }, Qt::QueuedConnection);
+
     return true;
 }
 
 void SSHPortForward::stopForwarding()
 {
-    if (tcpServer)
+    if (!m_isForwarding)
+        return;
+
+    // First set flag to prevent new connections
+    m_isForwarding = false;
+
+    // Stop listening for new connections
+    if (m_server->isListening())
     {
-        tcpServer->close();
-        delete tcpServer;
-        tcpServer = nullptr;
+        m_server->close();
     }
 
-    // Clean up any active forwarding channels
-    for (auto channel : channels)
+    // Close all active channels safely
+    QList< ForwardingChannel * > channelsToRemove = m_channels; // Make a copy
+    for (auto channel : channelsToRemove)
     {
-        channel->stop();
-        ssh_channel_free(channel->channel());
-        delete channel;
+        if (channel)
+        {
+            channel->stop();
+            channel->deleteLater();
+        }
     }
-    channels.clear();
+    m_channels.clear();
+
+    // Reset other members
+    m_localPort = 0;
+    m_remotePort = 0;
+    m_remoteHost.clear();
 
     emit forwardingStopped();
 }
 
-void SSHPortForward::handleNewConnection(QTcpSocket *socket, const QString &remoteHost, quint16 remotePort)
+bool SSHPortForward::isForwarding() const
 {
-    socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+    return m_isForwarding;
+}
 
-    ssh_channel channel = ssh_channel_new(client->session());
+quint16 SSHPortForward::localPort() const
+{
+    return m_localPort;
+}
+
+void SSHPortForward::handleNewConnection()
+{
+    QTcpSocket *socket = m_server->nextPendingConnection();
+    if (!socket)
+        return;
+
+    // Configure socket for optimal performance
+    socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+    socket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, 256 * 1024);
+    socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, 256 * 1024);
+
+    ssh_channel channel = ssh_channel_new(m_client->session());
     if (!channel)
     {
         socket->close();
@@ -74,58 +119,57 @@ void SSHPortForward::handleNewConnection(QTcpSocket *socket, const QString &remo
         return;
     }
 
-    // Set the channel to non-blocking mode
-    ssh_channel_set_blocking(channel, 0);
-
-    // First set the channel blocking mode before opening
+    // Keep blocking for initial setup
     ssh_channel_set_blocking(channel, 1);
 
-    if (ssh_channel_open_forward(channel, remoteHost.toUtf8().constData(), remotePort, "localhost",
-                                 socket->localPort()) != SSH_OK)
+    int rc = ssh_channel_open_forward(channel, m_remoteHost.toUtf8().constData(), m_remotePort, "localhost",
+                                      socket->localPort());
+    if (rc != SSH_OK)
     {
         ssh_channel_free(channel);
         socket->close();
         socket->deleteLater();
-        emit error(QString("Failed to open forward channel: %1").arg(ssh_get_error(client->session())));
+        emit error(QString("Failed to open forward channel: %1").arg(ssh_get_error(m_client->session())));
         return;
     }
 
+    // Switch to non-blocking for data transfer
+    ssh_channel_set_blocking(channel, 0);
+
     auto forwardChannel = new ForwardingChannel(channel, this);
-    channels.append(forwardChannel);
+    m_channels.append(forwardChannel);
 
-    // Use queued connections for thread safety
-    connect(
-        forwardChannel, &ForwardingChannel::dataReceived, socket,
-        [socket](const QByteArray &data) { socket->write(data); }, Qt::QueuedConnection);
-
-    connect(socket, &QTcpSocket::readyRead, this, [=]() {
+    // Connect socket -> channel
+    connect(socket, &QTcpSocket::readyRead, this, [socket, forwardChannel]() {
         if (socket->bytesAvailable() > 0)
         {
-            QByteArray data = socket->readAll();
-            QMetaObject::invokeMethod(forwardChannel, [=]() { forwardChannel->writeData(data); }, Qt::QueuedConnection);
+            forwardChannel->writeData(socket->readAll());
         }
     });
 
-    // Handle channel closure
-    connect(forwardChannel, &ForwardingChannel::channelClosed, this, [=]() { socket->close(); });
+    // Connect channel -> socket
+    connect(
+        forwardChannel, &ForwardingChannel::dataReceived, socket,
+        [socket](const QByteArray &data) { socket->write(data); }, Qt::DirectConnection);
 
-    connect(socket, &QTcpSocket::disconnected, this, [=]() {
-        channels.removeOne(forwardChannel);
-        ssh_channel_free(channel);
-        forwardChannel->deleteLater();
+    // Handle closures
+    connect(forwardChannel, &ForwardingChannel::channelClosed, socket, &QTcpSocket::close);
+    connect(socket, &QTcpSocket::disconnected, this, [this, socket, forwardChannel]() {
+        cleanupChannel(forwardChannel);
         socket->deleteLater();
-        emit connectionClosed();
     });
 
-    // Start forwarding in a new thread
-    QThread *thread = new QThread(this);
-    forwardChannel->moveToThread(thread);
+    forwardChannel->start();
+    emit newConnectionEstablished(m_remoteHost, m_remotePort);
+}
 
-    connect(thread, &QThread::started, forwardChannel, &ForwardingChannel::start);
-    connect(thread, &QThread::finished, thread, &QThread::deleteLater);
-    connect(forwardChannel, &ForwardingChannel::channelClosed, thread, &QThread::quit);
+void SSHPortForward::cleanupChannel(ForwardingChannel *channel)
+{
+    if (!channel)
+        return;
 
-    thread->start();
-
-    emit newConnectionEstablished(remoteHost, remotePort);
+    m_channels.removeOne(channel);
+    channel->stop();
+    channel->deleteLater();
+    emit connectionClosed();
 }

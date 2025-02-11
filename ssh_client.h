@@ -12,6 +12,8 @@ class SSHClient : public QObject {
     Q_OBJECT
 
 public:
+    using PtyFilterCallback = std::function< QByteArray(const QByteArray &) >;
+
     enum class AuthMethod
     {
         Password,
@@ -34,6 +36,62 @@ public:
         uint16_t destPort;
     };
 
+    enum class PtyOutputMode
+    {
+        Raw,      // No filtering
+        StripAll, // Remove all escape sequences
+        Basic,    // Keep basic formatting (colors, bold, etc)
+        Custom    // Use custom filter function
+    };
+
+    struct CommandOptions
+    {
+        bool mergeOutput = true;
+        bool ptyEnabled = false;
+        int columns = 80;
+        int rows = 24;
+        QString term = "xterm";
+        PtyOutputMode outputMode = PtyOutputMode::Raw;
+    };
+
+    struct PersistentChannel
+    {
+        ssh_channel channel;
+        bool active;
+        CommandOptions options;
+        bool hasExited;
+        int exitStatus;
+    };
+
+private:
+    static constexpr int CHANNEL_BUFFER_SIZE = 4096;
+    static constexpr int CHANNEL_CHECK_INTERVAL = 100; // ms
+
+    struct Channel
+    {
+        ssh_channel channel;
+        TunnelConfig config;
+    };
+
+    ssh_session m_session;
+    QMap< QString, Channel > m_activeChannels;
+    QTimer m_channelCheckTimer;
+    QString m_currentHostname;
+    QString m_currentUsername;
+    bool m_isAuthenticated;
+    std::unique_ptr< PersistentChannel > m_persistentChannel;
+    ssh_channel m_shellChannel = nullptr;
+    PtyFilterCallback m_ptyFilter;
+
+    bool verifyHostKey();
+    void cleanupSession();
+    void initializeSession();
+    void checkPersistentChannel();
+
+    QByteArray filterPtyOutput(const QByteArray &data);
+    QByteArray stripAnsiSequences(const QByteArray &data, bool keepBasicFormatting);
+
+public:
     explicit SSHClient(QObject *parent = nullptr);
     ~SSHClient();
 
@@ -58,10 +116,16 @@ public:
 
     ssh_session session() const;
 
-    uint64_t executeCommandAsync(const QString &command);
-    void closeCommandChannel(uint64_t channelId);
-    bool isCommandChannelActive(uint64_t channelId) const;
-    bool writeToCommandChannel(uint64_t channelId, const QByteArray &data);
+    bool openCommandChannel(const CommandOptions &options = CommandOptions());
+    bool isCommandChannelOpen() const;
+    void closeCommandChannel();
+    bool executeInChannel(const QString &command);
+    bool writeToChannel(const QByteArray &data);
+    bool resizeChannel(int columns, int rows);
+
+    void setPtyFilter(PtyFilterCallback filter);
+
+    QByteArray cleanTerminalOutput(const QByteArray &data);
 
 signals:
     void connected();
@@ -74,9 +138,10 @@ signals:
     void tunnelClosed(const QString &bindAddress, uint16_t bindPort);
     void dataReceived(const QByteArray &data);
 
-    void commandChannelClosed(uint64_t channelId);
-    void commandOutputReceived(uint64_t channelId, const QByteArray &data);
-    void commandChannelError(uint64_t channelId, const QString &error);
+    void channelOpened();
+    void channelClosed(int exitStatus);
+    void channelOutputReceived(const QByteArray &data, bool isStderr);
+    void channelError(const QString &error);
 
 public slots:
     void sendKeyboardInteractiveResponse(const QStringList &responses);
@@ -84,37 +149,4 @@ public slots:
 
 private slots:
     void checkChannels();
-
-private:
-    struct Channel
-    {
-        ssh_channel channel;
-        TunnelConfig config;
-    };
-
-    bool verifyHostKey();
-    void cleanupSession();
-    void initializeSession();
-    bool handleAuthMethod(AuthMethod method);
-
-    ssh_session m_session;
-    QMap< QString, Channel > m_activeChannels;
-    QTimer m_channelCheckTimer;
-    QString m_currentHostname;
-    QString m_currentUsername;
-    bool m_isAuthenticated;
-
-    static constexpr int CHANNEL_BUFFER_SIZE = 4096;
-    static constexpr int CHANNEL_CHECK_INTERVAL = 100; // ms
-
-    struct CommandChannel
-    {
-        ssh_channel channel;
-        QString command;
-        bool active;
-    };
-
-    QMap< uint64_t, CommandChannel > m_commandChannels;
-    uint64_t m_nextCommandChannelId{0};
-    ssh_channel m_shellChannel = nullptr;
 };
