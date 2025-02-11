@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QCloseEvent>
 #include <QMainWindow>
 
 #include <memory>
@@ -57,6 +58,8 @@ public slots:
     void on_connectTunnelButton_clicked();
     void on_disconnectTunnelButton_clicked();
 
+    void closeEvent(QCloseEvent *event) override;
+
 private:
     Ui::MainWindow *ui;
 
@@ -64,4 +67,6 @@ private:
     SSHPortForward *m_sshPortForward{nullptr};
 
     uint64_t m_commandChannel = 0;
+
+    QString m_notebookUrl;
 };

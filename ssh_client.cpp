@@ -15,7 +15,7 @@ SSHClient::SSHClient(QObject *parent)
 
 SSHClient::~SSHClient()
 {
-    disconnect();
+    // disconnect();
 }
 
 bool SSHClient::connectToHost(const QString &hostname, const QString &username, uint16_t port)
@@ -315,7 +315,6 @@ bool SSHClient::isAuthenticated() const
 
 void SSHClient::checkChannels()
 {
-    std::cout << "Checking channels\n";
     if (!m_session)
         return;
 

@@ -5,7 +5,12 @@
 
 #include <iostream>
 
+#include <QDesktopServices>
 #include <QInputDialog>
+#include <QRegularExpression>
+#include <QRegularExpressionMatch>
+#include <QRegularExpressionMatchIterator>
+#include <QUrl>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), m_sshClient(nullptr), m_sshPortForward(nullptr)
@@ -35,18 +40,20 @@ MainWindow::MainWindow(QWidget *parent)
     ui->connectTunnelButton->setEnabled(true);
     ui->disconnectTunnelButton->setEnabled(false);
 
-    ui->hostnameEdit->setText("192.168.86.28");
+    ui->hostnameEdit->setText("172.25.140.201");
     ui->usernameEdit->setText("lindemann");
 }
 
 MainWindow::~MainWindow()
 {
+    /*
     if (m_sshPortForward != nullptr)
         delete m_sshPortForward;
 
     if (m_sshClient != nullptr)
         delete m_sshClient;
 
+    */
     delete ui;
 }
 
@@ -111,6 +118,14 @@ void MainWindow::onAuthenticationSucceeded()
     options.outputMode = SSHClient::PtyOutputMode::StripAll;
 
     m_sshClient->openCommandChannel(options);
+
+    if (m_sshClient->isCommandChannelOpen())
+    {
+        log("Command channel is open");
+
+        m_sshClient->executeInChannel("conda activate numpy-env");
+        m_sshClient->executeInChannel("jupyter lab --no-browser");
+    }
 }
 
 void MainWindow::onKeyboardInteractivePrompt(const QString &name, const QString &instruction,
@@ -187,10 +202,76 @@ void MainWindow::onChannelClosed(int exitStatus)
     log("Command channel closed with exit status: " + QString::number(exitStatus));
 }
 
+std::vector< QString > extractUrls(const QString &input)
+{
+    std::vector< QString > urls;
+
+    // Regular expression pattern for URLs
+    // This pattern matches common URL formats including http, https, ftp
+    QRegularExpression urlRegex(QStringLiteral(R"((https?|ftp):\/\/)"                        // Protocol
+                                               R"([\w_-]+(?:(?:\.[\w_-]+)+))"                // Domain name
+                                               R"(([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])?)") // Path and query
+    );
+
+    // Find all matches in the input string
+    QRegularExpressionMatchIterator matchIterator = urlRegex.globalMatch(input);
+
+    // Extract each URL match
+    while (matchIterator.hasNext())
+    {
+        QRegularExpressionMatch match = matchIterator.next();
+        urls.push_back(match.captured(0));
+    }
+
+    return urls;
+}
+
 void MainWindow::onChannelOutputReceived(const QByteArray &data, bool isStderr)
 {
     // log("Command output received: " + QString::fromUtf8(data));
+
+    auto receivedString = QString::fromUtf8(data);
     ui->textEdit->append(QString::fromUtf8(data));
+
+    auto urls = extractUrls(receivedString);
+
+    if (urls.size() > 0)
+    {
+        for (auto &url : urls)
+        {
+            log("URL: " + QString(url));
+            m_notebookUrl = url;
+        }
+
+        bool success = QDesktopServices::openUrl(QUrl(m_notebookUrl));
+        if (!success)
+        {
+            // Handle error case
+            qDebug() << "Failed to open URL";
+        }
+        else
+        {
+            if (m_sshPortForward == nullptr)
+            {
+                m_sshPortForward = new SSHPortForward(m_sshClient, this);
+                connect(m_sshPortForward, &SSHPortForward::forwardingStarted, this, &MainWindow::onForwardingStarted,
+                        Qt::QueuedConnection);
+                connect(m_sshPortForward, &SSHPortForward::forwardingStopped, this, &MainWindow::onForwardingStopped,
+                        Qt::QueuedConnection);
+                connect(m_sshPortForward, &SSHPortForward::error, this, &MainWindow::onForwardError,
+                        Qt::QueuedConnection);
+                connect(m_sshPortForward, &SSHPortForward::newConnectionEstablished, this,
+                        &MainWindow::onNewForwardConnectionEstablished, Qt::QueuedConnection);
+                connect(m_sshPortForward, &SSHPortForward::connectionClosed, this,
+                        &MainWindow::onForwardConnectionClosed, Qt::QueuedConnection);
+            }
+
+            m_sshPortForward->startForwarding(8888, "localhost", QUrl(m_notebookUrl).port());
+
+            ui->connectTunnelButton->setEnabled(false);
+            ui->disconnectTunnelButton->setEnabled(true);
+        }
+    }
 }
 
 void MainWindow::onChannelError(const QString &error)
@@ -272,4 +353,20 @@ void MainWindow::on_disconnectTunnelButton_clicked()
     m_sshPortForward->stopForwarding();
     ui->connectTunnelButton->setEnabled(true);
     ui->disconnectTunnelButton->setEnabled(false);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_sshClient != nullptr)
+    {
+        m_sshClient->disconnect();
+    }
+
+    if (m_sshPortForward != nullptr)
+    {
+        if (m_sshPortForward->isForwarding())
+            m_sshPortForward->stopForwarding();
+    }
+
+    event->accept();
 }

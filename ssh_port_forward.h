@@ -13,7 +13,7 @@ class SSHPortForward : public QObject {
     Q_OBJECT
 
 private:
-    QSharedPointer< SSHClient > m_client;
+    SSHClient *m_client;
     QTcpServer *m_server;
     QList< ForwardingChannel * > m_channels;
     QString m_remoteHost;

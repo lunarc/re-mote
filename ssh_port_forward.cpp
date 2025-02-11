@@ -49,8 +49,7 @@ bool SSHPortForward::startForwarding(quint16 localPort, const QString &remoteHos
     m_localPort = m_server->serverPort();
     m_isForwarding = true;
 
-    QMetaObject::invokeMethod(
-        this, [this]() { emit forwardingStarted(m_localPort); }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, [this]() { emit forwardingStarted(m_localPort); }, Qt::QueuedConnection);
 
     return true;
 }
