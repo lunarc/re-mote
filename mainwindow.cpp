@@ -37,11 +37,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     disableControls();
 
-    ui->connectTunnelButton->setEnabled(true);
-    ui->disconnectTunnelButton->setEnabled(false);
+    // ui->connectTunnelButton->setEnabled(true);
+    // ui->disconnectTunnelButton->setEnabled(false);
 
-    ui->hostnameEdit->setText("172.25.140.201");
-    ui->usernameEdit->setText("lindemann");
+    // ui->hostnameEdit->setText("172.25.140.201");
+    // ui->usernameEdit->setText("lindemann");
 }
 
 MainWindow::~MainWindow()
@@ -60,7 +60,7 @@ MainWindow::~MainWindow()
 void MainWindow::disableControls()
 {
     ui->connectButton->setEnabled(true);
-    ui->disconnectButton->setEnabled(false);
+    // ui->disconnectButton->setEnabled(false);
     ui->executeButton->setEnabled(false);
     ui->commandEdit->setEnabled(false);
 }
@@ -68,7 +68,7 @@ void MainWindow::disableControls()
 void MainWindow::enableControls()
 {
     ui->connectButton->setEnabled(false);
-    ui->disconnectButton->setEnabled(true);
+    // ui->disconnectButton->setEnabled(true);
     ui->executeButton->setEnabled(true);
     ui->commandEdit->setEnabled(true);
 }
@@ -268,8 +268,8 @@ void MainWindow::onChannelOutputReceived(const QByteArray &data, bool isStderr)
 
             m_sshPortForward->startForwarding(8888, "localhost", QUrl(m_notebookUrl).port());
 
-            ui->connectTunnelButton->setEnabled(false);
-            ui->disconnectTunnelButton->setEnabled(true);
+            // ui->connectTunnelButton->setEnabled(false);
+            // ui->disconnectTunnelButton->setEnabled(true);
         }
     }
 }
@@ -281,9 +281,7 @@ void MainWindow::onChannelError(const QString &error)
 
 void MainWindow::on_connectButton_clicked()
 {
-    m_sshClient->connectToHost(ui->hostnameEdit->text(), ui->usernameEdit->text());
-    // m_sshClient->authenticateWithPassword(ui->passwordEdit->text());
-    // m_sshClient->authenticateWithPublicKey("/path/to/private_key", "passphrase");
+    // m_sshClient->connectToHost(ui->hostnameEdit->text(), ui->usernameEdit->text());
 
     log("Trying to authenticate with KeyboardInteractive");
     m_sshClient->authenticateWithKeyboardInteractive();
@@ -292,7 +290,7 @@ void MainWindow::on_connectButton_clicked()
     if (!m_sshClient->isAuthenticated())
     {
         log("Trying to authenticate with Password");
-        m_sshClient->authenticateWithPassword(ui->passwordEdit->text());
+        // m_sshClient->authenticateWithPassword(ui->passwordEdit->text());
     }
     else
         log("Already authenticated");
@@ -309,8 +307,8 @@ void MainWindow::on_disconnectButton_clicked()
         if (m_sshPortForward->isForwarding())
             m_sshPortForward->stopForwarding();
 
-        ui->connectTunnelButton->setEnabled(true);
-        ui->disconnectTunnelButton->setEnabled(false);
+        // ui->connectTunnelButton->setEnabled(true);
+        // ui->disconnectTunnelButton->setEnabled(false);
     }
 }
 
@@ -344,15 +342,15 @@ void MainWindow::on_connectTunnelButton_clicked()
 
     m_sshPortForward->startForwarding(8888, "localhost", 8888);
 
-    ui->connectTunnelButton->setEnabled(false);
-    ui->disconnectTunnelButton->setEnabled(true);
+    // ui->connectTunnelButton->setEnabled(false);
+    // ui->disconnectTunnelButton->setEnabled(true);
 }
 
 void MainWindow::on_disconnectTunnelButton_clicked()
 {
     m_sshPortForward->stopForwarding();
-    ui->connectTunnelButton->setEnabled(true);
-    ui->disconnectTunnelButton->setEnabled(false);
+    // ui->connectTunnelButton->setEnabled(true);
+    // ui->disconnectTunnelButton->setEnabled(false);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
