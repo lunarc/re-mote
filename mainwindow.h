@@ -5,6 +5,7 @@
 
 #include <memory>
 
+#include "notebook_controller.h"
 #include "ssh_client.h"
 #include "ssh_port_forward.h"
 
@@ -51,12 +52,16 @@ public slots:
     void onChannelOutputReceived(const QByteArray &data, bool isStderr);
     void onChannelError(const QString &error);
 
+    void onJobTableUpdated();
+
     void on_connectButton_clicked();
     void on_disconnectButton_clicked();
     void on_executeButton_clicked();
     void on_commandEdit_returnPressed();
     void on_connectTunnelButton_clicked();
     void on_disconnectTunnelButton_clicked();
+    void on_newNotebookButton_clicked();
+    void on_refreshButton_clicked();
 
     void closeEvent(QCloseEvent *event) override;
 
@@ -69,4 +74,6 @@ private:
     uint64_t m_commandChannel = 0;
 
     QString m_notebookUrl;
+
+    NotebookControllerPtr m_notebookController;
 };

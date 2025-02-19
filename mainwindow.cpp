@@ -3,6 +3,8 @@
 
 #include "ssh_port_forward.h"
 
+#include "password_dialog.h"
+
 #include <iostream>
 
 #include <QDesktopServices>
@@ -18,6 +20,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     m_sshClient = new SSHClient(this);
+    m_notebookController = NotebookController::create(m_sshClient);
 
     // Connect signals
 
@@ -34,6 +37,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_sshClient, &SSHClient::channelOpened, this, &MainWindow::onChannelOpened);
     connect(m_sshClient, &SSHClient::channelClosed, this, &MainWindow::onChannelClosed);
     connect(m_sshClient, &SSHClient::channelError, this, &MainWindow::onChannelError);
+
+    connect(m_notebookController.get(), &NotebookController::jobTableUpdated, this, &MainWindow::onJobTableUpdated);
 
     disableControls();
 
@@ -123,8 +128,10 @@ void MainWindow::onAuthenticationSucceeded()
     {
         log("Command channel is open");
 
-        m_sshClient->executeInChannel("conda activate numpy-env");
-        m_sshClient->executeInChannel("jupyter lab --no-browser");
+        // m_sshClient->executeInChannel("conda activate numpy-env");
+        // m_sshClient->executeInChannel("jupyter lab --no-browser");
+        m_notebookController->initialise();
+        // m_sshClient->executeInChannel("nblaunch");
     }
 }
 
@@ -233,6 +240,13 @@ void MainWindow::onChannelOutputReceived(const QByteArray &data, bool isStderr)
     auto receivedString = QString::fromUtf8(data);
     ui->textEdit->append(QString::fromUtf8(data));
 
+    log("----- Command output received ---- ");
+    log(receivedString);
+    log("----- Command output end --------- ");
+
+    m_notebookController->parseCommandOutput(receivedString);
+
+    /*
     auto urls = extractUrls(receivedString);
 
     if (urls.size() > 0)
@@ -272,6 +286,7 @@ void MainWindow::onChannelOutputReceived(const QByteArray &data, bool isStderr)
             // ui->disconnectTunnelButton->setEnabled(true);
         }
     }
+    */
 }
 
 void MainWindow::onChannelError(const QString &error)
@@ -279,8 +294,28 @@ void MainWindow::onChannelError(const QString &error)
     log("Command channel error: " + error);
 }
 
+void MainWindow::onJobTableUpdated()
+{
+    log("Job table updated");
+}
+
 void MainWindow::on_connectButton_clicked()
 {
+    QString server, username, password;
+
+    server = "rocky9-vm.lunarc.lu.se";
+    username = "lindemann";
+
+    if (PasswordDialog::getConnectionInfo(this, server, username, password))
+    {
+        m_sshClient->connectToHost(server, username);
+        m_sshClient->authenticateWithPassword(password);
+    }
+    else
+    {
+        log("Connection cancelled");
+        return;
+    }
     // m_sshClient->connectToHost(ui->hostnameEdit->text(), ui->usernameEdit->text());
 
     log("Trying to authenticate with KeyboardInteractive");
@@ -351,6 +386,16 @@ void MainWindow::on_disconnectTunnelButton_clicked()
     m_sshPortForward->stopForwarding();
     // ui->connectTunnelButton->setEnabled(true);
     // ui->disconnectTunnelButton->setEnabled(false);
+}
+
+void MainWindow::on_newNotebookButton_clicked()
+{
+    m_notebookController->submit();
+}
+
+void MainWindow::on_refreshButton_clicked()
+{
+    m_notebookController->job_table();
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

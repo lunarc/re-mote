@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 
 project(re-mote VERSION 0.1 LANGUAGES CXX)
 
@@ -12,6 +12,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 #find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets
+
+# Tell CMake to use packages from vcpkg
+set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+# For libssh specifically  
+set(libssh_DIR "$ENV{VCPKG_ROOT}/vcpkg_installed/x64-windows/share/libssh" CACHE PATH "")
 
 find_package(libssh CONFIG REQUIRED)
 find_package(Qt6 COMPONENTS Widgets Network REQUIRED)
@@ -27,6 +32,11 @@ set(PROJECT_SOURCES
         mainwindow.cpp
         mainwindow.h
         mainwindow.ui
+        password_dialog.h
+        password_dialog.cpp
+        password_dialog.ui
+        notebook_controller.h
+        notebook_controller.cpp
 )
 
     qt_add_executable(re-mote
