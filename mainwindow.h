@@ -9,6 +9,17 @@
 #include "ssh_client.h"
 #include "ssh_port_forward.h"
 
+struct ConnectionSettings
+{
+    QString host{};
+    uint16_t port{22};
+    QString username{};
+    QString password{};
+    QString privateKeyPath{};
+    QString passphrase{};
+    bool useKeyboardInteractive = false;
+};
+
 QT_BEGIN_NAMESPACE
 namespace Ui
 {
@@ -62,6 +73,9 @@ public slots:
     void on_disconnectTunnelButton_clicked();
     void on_newNotebookButton_clicked();
     void on_refreshButton_clicked();
+    void on_closeButton_clicked();
+    void on_closeNotebookButton_clicked();
+    void on_openNotebookButton_clicked();
 
     void closeEvent(QCloseEvent *event) override;
 
@@ -76,4 +90,5 @@ private:
     QString m_notebookUrl;
 
     NotebookControllerPtr m_notebookController;
+    ConnectionSettings m_connectionSettings;
 };

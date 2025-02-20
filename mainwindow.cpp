@@ -3,6 +3,7 @@
 
 #include "ssh_port_forward.h"
 
+#include "job_dialog.h"
 #include "password_dialog.h"
 
 #include <iostream>
@@ -40,42 +41,44 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_notebookController.get(), &NotebookController::jobTableUpdated, this, &MainWindow::onJobTableUpdated);
 
+    m_sshPortForward = new SSHPortForward(m_sshClient, this);
+    connect(m_sshPortForward, &SSHPortForward::forwardingStarted, this, &MainWindow::onForwardingStarted,
+            Qt::QueuedConnection);
+    connect(m_sshPortForward, &SSHPortForward::forwardingStopped, this, &MainWindow::onForwardingStopped,
+            Qt::QueuedConnection);
+    connect(m_sshPortForward, &SSHPortForward::error, this, &MainWindow::onForwardError, Qt::QueuedConnection);
+    connect(m_sshPortForward, &SSHPortForward::newConnectionEstablished, this,
+            &MainWindow::onNewForwardConnectionEstablished, Qt::QueuedConnection);
+    connect(m_sshPortForward, &SSHPortForward::connectionClosed, this, &MainWindow::onForwardConnectionClosed,
+            Qt::QueuedConnection);
+
     disableControls();
-
-    // ui->connectTunnelButton->setEnabled(true);
-    // ui->disconnectTunnelButton->setEnabled(false);
-
-    // ui->hostnameEdit->setText("172.25.140.201");
-    // ui->usernameEdit->setText("lindemann");
 }
 
 MainWindow::~MainWindow()
 {
-    /*
-    if (m_sshPortForward != nullptr)
-        delete m_sshPortForward;
 
-    if (m_sshClient != nullptr)
-        delete m_sshClient;
-
-    */
     delete ui;
 }
 
 void MainWindow::disableControls()
 {
     ui->connectButton->setEnabled(true);
-    // ui->disconnectButton->setEnabled(false);
-    ui->executeButton->setEnabled(false);
-    ui->commandEdit->setEnabled(false);
+    ui->newNotebookButton->setEnabled(false);
+    ui->refreshButton->setEnabled(false);
+    ui->closeNotebookButton->setEnabled(false);
+    ui->closeButton->setEnabled(false);
+    ui->openNotebookButton->setEnabled(false);
 }
 
 void MainWindow::enableControls()
 {
     ui->connectButton->setEnabled(false);
-    // ui->disconnectButton->setEnabled(true);
-    ui->executeButton->setEnabled(true);
-    ui->commandEdit->setEnabled(true);
+    ui->newNotebookButton->setEnabled(true);
+    ui->refreshButton->setEnabled(true);
+    ui->closeNotebookButton->setEnabled(true);
+    ui->closeButton->setEnabled(true);
+    ui->openNotebookButton->setEnabled(true);
 }
 
 void MainWindow::log(const QString &message)
@@ -111,9 +114,10 @@ void MainWindow::onAuthenticationFailed()
 
 void MainWindow::onAuthenticationSucceeded()
 {
+    log("Authentication succeeded");
+
     ui->statusBar->showMessage("Authentication succeeded.");
     enableControls();
-    log("Authentication succeeded");
 
     SSHClient::CommandOptions options;
     options.ptyEnabled = true; // Enable PTY for interactive apps
@@ -127,18 +131,14 @@ void MainWindow::onAuthenticationSucceeded()
     if (m_sshClient->isCommandChannelOpen())
     {
         log("Command channel is open");
-
-        // m_sshClient->executeInChannel("conda activate numpy-env");
-        // m_sshClient->executeInChannel("jupyter lab --no-browser");
         m_notebookController->initialise();
-        // m_sshClient->executeInChannel("nblaunch");
+        m_notebookController->job_table();
     }
 }
 
 void MainWindow::onKeyboardInteractivePrompt(const QString &name, const QString &instruction,
                                              const QStringList &prompts)
 {
-    // For this example, we'll just send an empty response
     log("Received keyboard-interactive prompt: " + name + " - " + instruction);
 
     QStringList responses;
@@ -296,7 +296,35 @@ void MainWindow::onChannelError(const QString &error)
 
 void MainWindow::onJobTableUpdated()
 {
-    log("Job table updated");
+    log("Updating running table");
+    ui->runningTable->clearContents();
+
+    auto jobs = m_notebookController->jobs();
+
+    ui->runningTable->setRowCount(jobs.size());
+
+    ui->runningTable->setColumnCount(4);
+    ui->runningTable->setHorizontalHeaderLabels(QStringList() << "ID" << "Name" << "Status" << "URL");
+
+    for (int i = 0; i < jobs.size(); i++)
+    {
+        auto jobIdItem = new QTableWidgetItem(QString::number(jobs[i].id));
+        jobIdItem->setTextAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+
+        auto jobNameItem = new QTableWidgetItem(jobs[i].name);
+        jobNameItem->setTextAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+
+        auto jobStatusItem = new QTableWidgetItem(jobs[i].status);
+        jobStatusItem->setTextAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+
+        auto jobUrlItem = new QTableWidgetItem(jobs[i].url);
+        jobUrlItem->setTextAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+
+        ui->runningTable->setItem(i, 0, jobIdItem);
+        ui->runningTable->setItem(i, 1, jobNameItem);
+        ui->runningTable->setItem(i, 2, jobStatusItem);
+        ui->runningTable->setItem(i, 3, jobUrlItem);
+    }
 }
 
 void MainWindow::on_connectButton_clicked()
@@ -306,31 +334,33 @@ void MainWindow::on_connectButton_clicked()
     server = "rocky9-vm.lunarc.lu.se";
     username = "lindemann";
 
-    if (PasswordDialog::getConnectionInfo(this, server, username, password))
+    if (m_connectionSettings.useKeyboardInteractive)
     {
-        m_sshClient->connectToHost(server, username);
-        m_sshClient->authenticateWithPassword(password);
+        log("Trying to authenticate with KeyboardInteractive");
+        m_sshClient->authenticateWithKeyboardInteractive();
+        log("isAuthenticated: " + QString::number(m_sshClient->isAuthenticated()));
+
+        if (!m_sshClient->isAuthenticated())
+        {
+            log("Trying to authenticate with Password");
+            // m_sshClient->authenticateWithPassword(ui->passwordEdit->text());
+        }
+        else
+            log("Already authenticated");
     }
     else
     {
-        log("Connection cancelled");
-        return;
+        if (PasswordDialog::getConnectionInfo(this, server, username, password))
+        {
+            m_sshClient->connectToHost(server, username);
+            m_sshClient->authenticateWithPassword(password);
+        }
+        else
+        {
+            log("Connection cancelled");
+            return;
+        }
     }
-    // m_sshClient->connectToHost(ui->hostnameEdit->text(), ui->usernameEdit->text());
-
-    log("Trying to authenticate with KeyboardInteractive");
-    m_sshClient->authenticateWithKeyboardInteractive();
-    log("isAuthenticated: " + QString::number(m_sshClient->isAuthenticated()));
-
-    if (!m_sshClient->isAuthenticated())
-    {
-        log("Trying to authenticate with Password");
-        // m_sshClient->authenticateWithPassword(ui->passwordEdit->text());
-    }
-    else
-        log("Already authenticated");
-
-    // m_sshClient->executeCommand("ls -l");
 }
 
 void MainWindow::on_disconnectButton_clicked()
@@ -341,9 +371,6 @@ void MainWindow::on_disconnectButton_clicked()
     {
         if (m_sshPortForward->isForwarding())
             m_sshPortForward->stopForwarding();
-
-        // ui->connectTunnelButton->setEnabled(true);
-        // ui->disconnectTunnelButton->setEnabled(false);
     }
 }
 
@@ -376,26 +403,82 @@ void MainWindow::on_connectTunnelButton_clicked()
     }
 
     m_sshPortForward->startForwarding(8888, "localhost", 8888);
-
-    // ui->connectTunnelButton->setEnabled(false);
-    // ui->disconnectTunnelButton->setEnabled(true);
 }
 
 void MainWindow::on_disconnectTunnelButton_clicked()
 {
     m_sshPortForward->stopForwarding();
-    // ui->connectTunnelButton->setEnabled(true);
-    // ui->disconnectTunnelButton->setEnabled(false);
 }
 
 void MainWindow::on_newNotebookButton_clicked()
 {
-    m_notebookController->submit();
+    QString name, notebookEnv, wallTime;
+    int tasksPerNode;
+
+    if (JobDialog::getJobInfo(this, name, notebookEnv, wallTime, tasksPerNode))
+    {
+        m_notebookController->submit(name, notebookEnv, wallTime, tasksPerNode);
+    }
+    else
+    {
+        log("Notebook creation cancelled.");
+        return;
+    }
 }
 
 void MainWindow::on_refreshButton_clicked()
 {
     m_notebookController->job_table();
+}
+
+void MainWindow::on_closeButton_clicked()
+{
+    m_sshClient->closeCommandChannel();
+    m_sshClient->disconnect();
+    if (m_sshPortForward != nullptr)
+    {
+        if (m_sshPortForward->isForwarding())
+            m_sshPortForward->stopForwarding();
+    }
+    disableControls();
+}
+
+void MainWindow::on_closeNotebookButton_clicked()
+{
+    auto selectedItems = ui->runningTable->selectedItems();
+
+    if (selectedItems.size() > 0)
+    {
+        for (auto item : selectedItems)
+        {
+            auto jobId = item->text().toInt();
+            m_notebookController->cancel(jobId);
+        }
+    }
+
+    m_notebookController->job_table();
+}
+
+void MainWindow::on_openNotebookButton_clicked()
+{
+    auto selectedItems = ui->runningTable->selectedItems();
+
+    if (selectedItems.size() > 0)
+    {
+        auto url = selectedItems[3]->text();
+        log("Opening URL: " + url);
+
+        // m_sshPortForward->startForwarding(8888, "localhost", QUrl(url).port());
+
+        /*
+        bool success = QDesktopServices::openUrl(QUrl(url));
+        if (!success)
+        {
+            // Handle error case
+            qDebug() << "Failed to open URL";
+        }
+        */
+    }
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

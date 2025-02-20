@@ -45,7 +45,7 @@ public:
 
     bool isInitialised() const;
 
-    void submit();
+    void submit(QString &name, QString &notebookEnv, QString &wallTime, int tasksPerNode);
     void job_table();
     void cancel(int id);
     void cancel_all();
@@ -56,6 +56,8 @@ public:
     void parseCommandOutput(const QString &output);
     void parseJobTable(const QString &output);
     void parseSubmit(const QString &output);
+
+    const QVector< Job > &jobs() const;
 
 signals:
     void jobTableUpdated();

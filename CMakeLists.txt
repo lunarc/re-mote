@@ -37,6 +37,9 @@ set(PROJECT_SOURCES
         password_dialog.ui
         notebook_controller.h
         notebook_controller.cpp
+        job_dialog.h
+        job_dialog.cpp
+        job_dialog.ui
 )
 
     qt_add_executable(re-mote

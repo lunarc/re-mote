@@ -35,7 +35,7 @@
       <property name="font">
        <font>
         <family>Barlow Condensed</family>
-        <pointsize>20</pointsize>
+        <pointsize>24</pointsize>
         <bold>false</bold>
        </font>
       </property>
@@ -44,7 +44,8 @@
       </property>
       <property name="styleSheet">
        <string notr="true">QLabel {
-	background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 rgba(200, 200, 255, 255), stop:1 rgba(255, 255, 255, 255));
+	background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 rgba(50, 50, 255, 255), stop:1 rgba(255, 255, 255, 255));
+	color: rgb(255, 255, 255);
 }</string>
       </property>
       <property name="text">
@@ -54,7 +55,7 @@
        <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignVCenter</set>
       </property>
       <property name="margin">
-       <number>20</number>
+       <number>15</number>
       </property>
       <property name="indent">
        <number>10</number>
@@ -138,6 +139,28 @@
          <string>...</string>
         </property>
         <property name="icon">
+         <iconset theme="QIcon::ThemeIcon::DocumentNew"/>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>32</width>
+          <height>32</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="openNotebookButton">
+        <property name="minimumSize">
+         <size>
+          <width>50</width>
+          <height>50</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>...</string>
+        </property>
+        <property name="icon">
          <iconset theme="QIcon::ThemeIcon::DocumentOpen"/>
         </property>
         <property name="iconSize">
@@ -206,28 +229,6 @@
        </spacer>
       </item>
       <item>
-       <widget class="QToolButton" name="settingsButton">
-        <property name="minimumSize">
-         <size>
-          <width>50</width>
-          <height>50</height>
-         </size>
-        </property>
-        <property name="text">
-         <string>...</string>
-        </property>
-        <property name="icon">
-         <iconset theme="document-properties"/>
-        </property>
-        <property name="iconSize">
-         <size>
-          <width>32</width>
-          <height>32</height>
-         </size>
-        </property>
-       </widget>
-      </item>
-      <item>
        <widget class="QToolButton" name="closeButton">
         <property name="minimumSize">
          <size>
@@ -240,6 +241,28 @@
         </property>
         <property name="icon">
          <iconset theme="QIcon::ThemeIcon::SystemShutdown"/>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>32</width>
+          <height>32</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="settingsButton">
+        <property name="minimumSize">
+         <size>
+          <width>50</width>
+          <height>50</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>...</string>
+        </property>
+        <property name="icon">
+         <iconset theme="document-properties"/>
         </property>
         <property name="iconSize">
          <size>
@@ -286,7 +309,26 @@
          </attribute>
          <layout class="QVBoxLayout" name="verticalLayout_4">
           <item>
-           <widget class="QTableWidget" name="runningTable"/>
+           <widget class="QTableWidget" name="runningTable">
+            <property name="editTriggers">
+             <set>QAbstractItemView::EditTrigger::NoEditTriggers</set>
+            </property>
+            <property name="alternatingRowColors">
+             <bool>true</bool>
+            </property>
+            <property name="selectionMode">
+             <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+            </property>
+            <property name="selectionBehavior">
+             <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+            </property>
+            <attribute name="horizontalHeaderStretchLastSection">
+             <bool>true</bool>
+            </attribute>
+            <attribute name="verticalHeaderVisible">
+             <bool>false</bool>
+            </attribute>
+           </widget>
           </item>
          </layout>
         </widget>
