@@ -14,6 +14,39 @@
 #include <QRegularExpressionMatch>
 #include <QRegularExpressionMatchIterator>
 #include <QUrl>
+#include <QUrlQuery>
+
+struct NotebookUrlParts
+{
+    QString protocol;
+    QString host;
+    int port;
+    QString path;
+    QString token;
+};
+
+NotebookUrlParts parseNotebookUrl(const QString &urlString)
+{
+    NotebookUrlParts parts;
+
+    // Create QUrl object from the string
+    QUrl url(urlString);
+
+    // Extract basic URL components
+    parts.protocol = url.scheme();
+    parts.host = url.host();
+    parts.port = url.port();
+    parts.path = url.path();
+
+    // Parse query parameters to get the token
+    QUrlQuery query(url);
+    if (query.hasQueryItem("token"))
+    {
+        parts.token = query.queryItemValue("token");
+    }
+
+    return parts;
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), m_sshClient(nullptr), m_sshPortForward(nullptr)
@@ -304,7 +337,10 @@ void MainWindow::onJobTableUpdated()
     ui->runningTable->setRowCount(jobs.size());
 
     ui->runningTable->setColumnCount(4);
-    ui->runningTable->setHorizontalHeaderLabels(QStringList() << "ID" << "Name" << "Status" << "URL");
+    ui->runningTable->setHorizontalHeaderLabels(QStringList() << "ID"
+                                                              << "Name"
+                                                              << "Status"
+                                                              << "URL");
 
     for (int i = 0; i < jobs.size(); i++)
     {
@@ -449,11 +485,8 @@ void MainWindow::on_closeNotebookButton_clicked()
 
     if (selectedItems.size() > 0)
     {
-        for (auto item : selectedItems)
-        {
-            auto jobId = item->text().toInt();
-            m_notebookController->cancel(jobId);
-        }
+        auto jobId = selectedItems[0]->text().toInt();
+        m_notebookController->cancel(jobId);
     }
 
     m_notebookController->job_table();
@@ -468,16 +501,35 @@ void MainWindow::on_openNotebookButton_clicked()
         auto url = selectedItems[3]->text();
         log("Opening URL: " + url);
 
-        // m_sshPortForward->startForwarding(8888, "localhost", QUrl(url).port());
+        auto parts = parseNotebookUrl(url);
 
-        /*
-        bool success = QDesktopServices::openUrl(QUrl(url));
+        if (parts.token.isEmpty())
+        {
+            log("No token found in URL");
+            return;
+        }
+
+        log("Protocol: " + parts.protocol);
+        log("Host: " + parts.host);
+        log("Port: " + QString::number(parts.port));
+        log("Path: " + parts.path);
+        log("Token: " + parts.token);
+
+        QUrl localUrl;
+        localUrl.setScheme(parts.protocol);
+        localUrl.setHost(parts.host);
+        localUrl.setPort(8888);
+        localUrl.setPath(parts.path);
+        localUrl.setQuery("token=" + parts.token);
+
+        m_sshPortForward->startForwarding(8888, "localhost", QUrl(url).port());
+
+        bool success = QDesktopServices::openUrl(localUrl);
         if (!success)
         {
             // Handle error case
             qDebug() << "Failed to open URL";
         }
-        */
     }
 }
 

@@ -21,7 +21,7 @@ set(libssh_DIR "$ENV{VCPKG_ROOT}/vcpkg_installed/x64-windows/share/libssh" CACHE
 find_package(libssh CONFIG REQUIRED)
 find_package(Qt6 COMPONENTS Widgets Network REQUIRED)
 
-set(PROJECT_SOURCES
+set(PROJECT_SOURCES 
         ssh_client.h
         ssh_client.cpp
         ssh_port_forward.h
