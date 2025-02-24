@@ -278,48 +278,6 @@ void MainWindow::onChannelOutputReceived(const QByteArray &data, bool isStderr)
     log("----- Command output end --------- ");
 
     m_notebookController->parseCommandOutput(receivedString);
-
-    /*
-    auto urls = extractUrls(receivedString);
-
-    if (urls.size() > 0)
-    {
-        for (auto &url : urls)
-        {
-            log("URL: " + QString(url));
-            m_notebookUrl = url;
-        }
-
-        bool success = QDesktopServices::openUrl(QUrl(m_notebookUrl));
-        if (!success)
-        {
-            // Handle error case
-            qDebug() << "Failed to open URL";
-        }
-        else
-        {
-            if (m_sshPortForward == nullptr)
-            {
-                m_sshPortForward = new SSHPortForward(m_sshClient, this);
-                connect(m_sshPortForward, &SSHPortForward::forwardingStarted, this, &MainWindow::onForwardingStarted,
-                        Qt::QueuedConnection);
-                connect(m_sshPortForward, &SSHPortForward::forwardingStopped, this, &MainWindow::onForwardingStopped,
-                        Qt::QueuedConnection);
-                connect(m_sshPortForward, &SSHPortForward::error, this, &MainWindow::onForwardError,
-                        Qt::QueuedConnection);
-                connect(m_sshPortForward, &SSHPortForward::newConnectionEstablished, this,
-                        &MainWindow::onNewForwardConnectionEstablished, Qt::QueuedConnection);
-                connect(m_sshPortForward, &SSHPortForward::connectionClosed, this,
-                        &MainWindow::onForwardConnectionClosed, Qt::QueuedConnection);
-            }
-
-            m_sshPortForward->startForwarding(8888, "localhost", QUrl(m_notebookUrl).port());
-
-            // ui->connectTunnelButton->setEnabled(false);
-            // ui->disconnectTunnelButton->setEnabled(true);
-        }
-    }
-    */
 }
 
 void MainWindow::onChannelError(const QString &error)
@@ -367,7 +325,10 @@ void MainWindow::on_connectButton_clicked()
 {
     QString server, username, password;
 
-    server = "rocky9-vm.lunarc.lu.se";
+    // server = "rocky9-vm.lunarc.lu.se";
+    // username = "lindemann";
+
+    server = "192.168.86.28";
     username = "lindemann";
 
     if (m_connectionSettings.useKeyboardInteractive)
@@ -424,26 +385,10 @@ void MainWindow::on_commandEdit_returnPressed()
 
 void MainWindow::on_connectTunnelButton_clicked()
 {
-    if (m_sshPortForward == nullptr)
-    {
-        m_sshPortForward = new SSHPortForward(m_sshClient, this);
-        connect(m_sshPortForward, &SSHPortForward::forwardingStarted, this, &MainWindow::onForwardingStarted,
-                Qt::QueuedConnection);
-        connect(m_sshPortForward, &SSHPortForward::forwardingStopped, this, &MainWindow::onForwardingStopped,
-                Qt::QueuedConnection);
-        connect(m_sshPortForward, &SSHPortForward::error, this, &MainWindow::onForwardError, Qt::QueuedConnection);
-        connect(m_sshPortForward, &SSHPortForward::newConnectionEstablished, this,
-                &MainWindow::onNewForwardConnectionEstablished, Qt::QueuedConnection);
-        connect(m_sshPortForward, &SSHPortForward::connectionClosed, this, &MainWindow::onForwardConnectionClosed,
-                Qt::QueuedConnection);
-    }
-
-    m_sshPortForward->startForwarding(8888, "localhost", 8888);
 }
 
 void MainWindow::on_disconnectTunnelButton_clicked()
 {
-    m_sshPortForward->stopForwarding();
 }
 
 void MainWindow::on_newNotebookButton_clicked()
